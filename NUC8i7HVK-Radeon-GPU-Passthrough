@@ -1,0 +1,130 @@
+Based on an article by worryboy007 (https://www.reddit.com/r/VFIO/comments/s99xk0/comment/ji1a9el/)
+
+My Hardware Configuration:
+Intel NUC8i7HVK
+CPU: Intel® Core™ i7-8809G Processor GPU: Radeon™ RX Vega M GH graphics (8M Cache, 4GB Ram) Memory: 64GB DDDR4-3200
+
+My Software Configuration:
+Proxmox PVE Build (8.3.5 as of this writing)
+TrueNAS-SCALE-24.04.2.5 VM with AMD Radeon RX Vega M GH Graphics passthrough for Plex decoding
+
+Configuring Proxmox:
+
+Step 1 (not optional): ROM File Issues
+
+We have to dump the first 128k of the VBIOS of the Vega M and use that as romfile when passing through. This is a process unto itself, and requires some extra steps, as outlined below.
+
+    Step 1.1 to Dump ROM File:
+
+a. Using GPU-Z (recommended) if you have windows installed or bootable
+b. Using AMDvbFlash (download from https://www.techpowerup.com/download/ati-atiflash/)
+
+Run the ADMvbFlash and execute these commands:
+./amdvbflash -s 0 ./vbios.rom
+head -c 131072 vbios.rom > AMD.VegaM.128.rom
+
+    Step 1.2: Copy the ROM file (if you downloaded or created in a diffrent directory it) to the /usr/share/kvm/ directory.
+
+You can use SFTP for this, or directly through the system itself (e.g. proxmox PVE):
+scp /path/to/<romfilename>.rom myusername@proxmoxserveraddress:/usr/share/kvm/<romfilename>.rom
+cp /path/to/<romfilename>.rom /usr/share/kvm
+
+Step 2: Configuring the Systemd
+
+    Remark: if your using ZFS you have to use systemd config instead of grub (https://pve.proxmox.com/pve-docs/chapter-sysadmin.html#sysboot_determine_bootloader_used)
+
+In my case, I'm using grub, so I edit the /etc/default/grub file:
+nano /etc/default/grub
+
+And change this line:
+GRUB_CMDLINE_LINUX_DEFAULT="quiet"
+
+For this:
+GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu pcie_acs_override=downstream initcall_blacklist=sysfb_init"
+
+
+When you finished editing the file, run:
+update-grub
+or proxmox-boot-tool refresh in case you worked with /etc/kernel/cmdline (systemd)
+
+Step 3: VFIO Modules
+
+You'll need to add a few VFIO modules to your Proxmox system. Again, using nano (or whatever), edit the file /etc/modules
+nano /etc/modules
+
+Add the following (copy/paste) to the /etc/modules file:
+vfio
+vfio_iommu_type1
+vfio_pci
+vfio_virqfd
+
+Then save and exit.
+
+Step 4: IOMMU interrupt remapping
+
+echo "options vfio_iommu_type1 allow_unsafe_interrupts=1" > /etc/modprobe.d/iommu_unsafe_interrupts.conf
+echo "options kvm ignore_msrs=1" > /etc/modprobe.d/kvm.conf
+
+Step 5: Blacklisting Drivers
+
+We don't want the Proxmox host system utilizing the GPU(s).
+
+Step 6: Adding GPU to VFIO
+
+Run this command:
+lspci -v
+
+Your shell window should output a bunch of stuff. Look for the line(s) that show your video card. It'll look something like this:
+
+01:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Polaris 22 XT [Radeon RX Vega M GH] (rev c0) (prog-if 00 [VGA controller])
+01:00.1 Audio device: Advanced Micro Devices, Inc. [AMD/ATI] Polaris 22 HDMI Audio
+
+Make note of the first set of numbers (e.g. 01:00.0 and 01:00.1). We'll need them for the next step.
+
+Run the command below. Replace 01:00 with whatever number was next to your GPU when you ran the previous command:
+lspci -nnk -s 01:00
+
+Doing this should output your GPU card's Vendor IDs, usually one ID for the GPU and one ID for the Audio bus.
+What we want to keep, are these vendor id codes: 1002:694c and 1002:ab08.
+
+    Remark: the Subsystem key may be relevant if you use the download option under point 1
+
+Now we add the GPU's vendor id's to the VFIO (remember may to replace the id's with your own!):
+echo "options vfio-pci ids=1002:694c,1002:ab08 disable_vga=1"> /etc/modprobe.d/vfio.conf
+
+Finally, we run this command:
+update-initramfs -u
+
+And restart Proxmox:
+reboot
+
+Now your Proxmox host should be ready to passthrough GPUs!
+Configuring the VM (TrueNAS SCALE)
+
+Step 1: Create a VM
+IMPORTANT: DO NOT START YOUR VM (yet)
+
+    Step 1.1 (Optional, but RECOMMENDED): Download VirtIO drivers
+
+Step 2: check OMVF (UEFI) for the VM - Although, it also works with SeaBIOS.
+
+Step 3: Edit the VM Config File to add the PCI Devices (GPU):
+
+Going back to the Shell window, we need to edit /etc/pve/qemu-server/<vmid>.conf, where <vmid> is the VM ID Number you used during the VM creation (General Tab):
+nano /etc/pve/qemu-server/<vmid>.conf
+
+In the editor, let's check these command lines:
+"cpu: host
+hostpci0: 0000:01:00.0,pcie=1,rombar=0,romfile=AMD.VegaM.128.rom
+#hostpci1: 0000:01:00.1,pcie=1
+ide2: none,media=cdrom
+machine: q35,viommu=intel"
+
+Passthrough 01:00.0 (Vega M GH) and 01:00.1 (Polaris 22 HDMI Audio) with their exact positions in the host's PCI tree to the same positions in the guest
+
+  Remark #1: In my case, I couldn't add the audio driver, so I just added the Radeon RX Vega VM. You can try by removing the "#".
+  Remark #2: The Primary GPU option did NOT work for me, i.e. "x-vga=1". I left the default display and added the Radeon RX Vega M with the ROM-Bar disabled and PCI-e enabled (as shown above).
+	
+Save and exit the editor.
+
+Step 5: START THE VM! 
