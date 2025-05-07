@@ -1,0 +1,56 @@
+Based on an article in Proxmox Forum by arnob216 (https://forum.proxmox.com/threads/enabled-gpu-passthrough-of-intel-hd-610-with-gvt-g-in-proxmox-8.134461)
+
+My Hardware Configuration:
+Intel NUC8i7HVK
+CPU: Intel® Core™ i7-8809G Processor | GPU: Intel HD 630 graphics
+
+My Software Configuration:
+Proxmox PVE Build (8.3.5 as of this writing)
+Windows 10 22H2 (OS Build 19045.5737) VM with Intel HD 630 graphics MAPPED via PCI Device (mdev)
+
+Configuring Proxmox:
+
+Step 1: Install the required drivers on the Proxmox host
+apt install -y intel-opencl-icd 
+
+Step 2: Edit grub
+nano /etc/default/grub
+
+- Add "i915.enable_gvt=1" to the "GRUB_CMDLINE_LINUX_DEFAULT" line (values separated by space), e.g.:
+GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu=on i915.enable_gvt=1" 
+
+Step 3: Update grub via command
+update-grub
+
+Step 4: Reboot PVE
+
+Step 5: Make sure /etc/modules has the following values (note the ones required for Intel GVT):
+
+# Modules required for PCI passthrough
+vfio
+vfio_iommu_type1
+vfio_pci
+vfio_virqfd
+
+# Modules required for Intel GVT
+kvmgt
+exngt
+Vfio-mdev
+
+Step 6: Run "update-initramfs -u" and reboot.
+
+    Remark: Step 6 is only required if file /etc/modules was updated.
+
+Step 7: Add the PCI Device via PVE GUI:
+"Datacentre > Resource Mapping > PCI Devices > Add"
+
+Choose "HD Graphics 630"
+
+    Remark: Column #5 (Mediated Devices) should state 'YES' "
+
+Give any name (e.g. HD630), chose the correct node, and tick the box for "Use with Mediated Devices".
+
+Step 8: Add the mdev device to the W10 VM
+"hostpci0: mapping=HD630,mdev=i915-GVTg_V5_4,pcie=1"
+
+Step 9: START THE VM! DONE!
