@@ -117,13 +117,12 @@ In the editor, let's check these command lines:
 "cpu: host
 hostpci0: 0000:01:00.0,pcie=1,rombar=0,romfile=AMD.VegaM.128.rom
 #hostpci1: 0000:01:00.1,pcie=1
-ide2: none,media=cdrom
 machine: q35,viommu=intel"
 
 Passthrough 01:00.0 (Vega M GH) and 01:00.1 (Polaris 22 HDMI Audio) with their exact positions in the host's PCI tree to the same positions in the guest
 
-  Remark #1: In my case, I couldn't add the audio driver, so I just added the Radeon RX Vega VM. You can try by removing the "#".
-  Remark #2: The Primary GPU option did NOT work for me, i.e. "x-vga=1". I left the default display and added the Radeon RX Vega M with the ROM-Bar disabled and PCI-e enabled (as shown above).
+  Remark #1: In my case, I couldn't add the audio driver, so I just added the Radeon RX Vega VM. Hence the "#" in line 3 above.
+  Remark #2: The Primary GPU option did NOT work for me, ("x-vga=1"). Apparently this is an option that should be used with Nvidia cards only. I left the default display and added the Radeon RX Vega M with the ROM-Bar disabled and PCI-e enabled (as shown above).
 	
 Save and exit the editor.
 
